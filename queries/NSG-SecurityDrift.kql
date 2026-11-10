@@ -1,0 +1,4 @@
+resourcechanges
+| extend targetType = tostring(properties.targetResourceType)
+| where targetType =~ "microsoft.network/networksecuritygroups"
+| project changeTime = todatetime(properties.changeAttributes.timestamp), targetResourceId = tostring(properties.targetResourceId), changedBy = tostring(properties.changeAttributes.changedBy)

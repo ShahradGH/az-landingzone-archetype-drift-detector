@@ -1,0 +1,9 @@
+name: Landing Zone Drift Reconciler CI
+on: [push, pull_request]
+jobs:
+  pester:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - shell: pwsh
+        run: Invoke-Pester -Path ./tests/LandingZoneDrift.Tests.ps1 -Output Detailed

@@ -1,0 +1,9 @@
+// Identify human ClickOps mutations vs OIDC pipeline deployments across Landing Zones
+AzureActivity
+| where TimeGenerated > ago(24h)
+| where CategoryValue == "Administrative" and ActivityStatusValue == "Succeeded"
+| where OperationNameValue endswith "/write" or OperationNameValue endswith "/delete"
+| extend CallerAppId = tostring(parse_json(Claims)["appid"])
+| where CallerAppId !in ("00000000-1111-2222-3333-444444444444") // Approved GitOps OIDC SPs
+| project TimeGenerated, Caller, CallerIpAddress, SubscriptionId, ResourceGroup, ResourceProviderValue, _ResourceId, OperationNameValue
+| order by TimeGenerated desc

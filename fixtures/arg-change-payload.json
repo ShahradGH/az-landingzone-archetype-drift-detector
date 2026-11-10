@@ -1,0 +1,10 @@
+[
+  {
+    "resourceId": "/subscriptions/sub-prod/resourceGroups/rg-net/providers/Microsoft.Network/networkSecurityGroups/nsg-app",
+    "changeType": "Update",
+    "clientType": "AzurePortal",
+    "propertyChanged": "securityRules[0].sourceAddressPrefix=*",
+    "activeP1Incident": null,
+    "expectedAction": "REVERT_IMMEDIATELY_HIGH_RISK_DRIFT"
+  }
+]

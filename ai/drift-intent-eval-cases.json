@@ -1,0 +1,40 @@
+{
+  "schemaVersion": "2026.11.1",
+  "abstentionConfidenceThreshold": 0.75,
+  "breakGlassTtlHours": 4,
+  "evalCases": [
+    {
+      "caseId": "DRIFT-01",
+      "resourceId": "/subscriptions/00000000-0000-0000-0000-000000000013/resourceGroups/rg-contoso-hub/providers/Microsoft.Network/networkSecurityGroups/nsg-ingress-prod",
+      "resourceType": "Microsoft.Network/networkSecurityGroups",
+      "clientType": "AzurePortal",
+      "callerUpn": "oncall.sre@contoso.com",
+      "propertyChanged": "securityRules[2].destinationPortRange=8443",
+      "incidentTicket": "INC-P1-482910",
+      "bridgeTranscriptExcerpt": "02:14 UTC [oncall.sre@contoso.com]: Opening temporary port 8443 on nsg-ingress-prod under INC-P1-482910 to restore payment gateway health.",
+      "expectedIntent": "AUTHORIZED_P1_HOTFIX_WITH_TTL"
+    },
+    {
+      "caseId": "DRIFT-02",
+      "resourceId": "/subscriptions/00000000-0000-0000-0000-000000000013/resourceGroups/rg-contoso-hub/providers/Microsoft.Network/networkSecurityGroups/nsg-app-prod",
+      "resourceType": "Microsoft.Network/networkSecurityGroups",
+      "clientType": "AzurePortal",
+      "callerUpn": "dev.contractor@contoso.com",
+      "propertyChanged": "securityRules[0].sourceAddressPrefix=*",
+      "incidentTicket": "",
+      "bridgeTranscriptExcerpt": "",
+      "expectedIntent": "SHADOW_IT_PORTAL_DRIFT"
+    },
+    {
+      "caseId": "DRIFT-03",
+      "resourceId": "/subscriptions/00000000-0000-0000-0000-000000000013/resourceGroups/rg-contoso-hub/providers/Microsoft.Network/routeTables/rt-spoke-egress",
+      "resourceType": "Microsoft.Network/routeTables",
+      "clientType": "AzureCLI",
+      "callerUpn": "netops.engineer@contoso.com",
+      "propertyChanged": "routes[1].nextHopIpAddress=198.51.100.99",
+      "incidentTicket": "INC-P1-482999",
+      "bridgeTranscriptExcerpt": "03:05 UTC [general]: Discussing unrelated DNS latency; no mention of routeTables or rt-spoke-egress.",
+      "expectedIntent": "ABSTAIN_UNCORROBORATED_CLAIM"
+    }
+  ]
+}

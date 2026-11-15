@@ -27,11 +27,11 @@ if ($isPerimeterResource -and [string]::IsNullOrWhiteSpace($ActivityLogEvent.Sev
     }
 }
 
-# 3. Sev-1 Break-Glass Hotfix: Open Automated Backport Bicep PR (4h TTL)
+# 3. Sev-1 Break-Glass Hotfix: Open Automated Backport REST PR (4h TTL)
 return [PSCustomObject]@{
     ResourceId     = $ActivityLogEvent.ResourceId
     CallerUpn      = $ActivityLogEvent.CallerUpn
     IncidentTicket = $ActivityLogEvent.Sev1IncidentTicketId
     Classification = 'SEV1_BREAK_GLASS_DRIFT'
-    Action         = 'OPEN_AUTOMATED_BICEP_BACKPORT_PR'
+    Action         = 'OPEN_AUTOMATED_REST_BACKPORT_PR'
 }

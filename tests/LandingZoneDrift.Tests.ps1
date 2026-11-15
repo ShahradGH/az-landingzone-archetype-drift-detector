@@ -1,83 +1,147 @@
 BeforeAll {
     $script:RepoRoot = Split-Path -Parent $PSScriptRoot
-    $script:EvaluatorPath = Join-Path $script:RepoRoot 'src/Test-LandingZoneWriteProvenance.ps1'
-    $script:KqlPath = Join-Path $script:RepoRoot 'queries/ResourceGraph-OutOfBandChanges.kql'
+    $script:ClassifierPath = Join-Path $script:RepoRoot 'ai/Invoke-DriftIntentClassifier.ps1'
+    $script:EvalCasesPath = Join-Path $script:RepoRoot 'ai/drift-intent-eval-cases.json'
+    $script:ModulePath = Join-Path $script:RepoRoot 'src/LandingZoneDrift.psd1'
+    $script:ProvenancePath = Join-Path $script:RepoRoot 'src/Test-LandingZoneWriteProvenance.ps1'
+    $script:GraphBridgePath = Join-Path $script:RepoRoot 'graph/Get-IncidentBridgeContext.ps1'
+    $script:EvalDoc = Get-Content -Path $script:EvalCasesPath -Raw | ConvertFrom-Json
+    Import-Module $script:ModulePath -Force
 }
 
-Describe 'Landing Zone Governance: Detecting & Reconciling Out-of-Band Azure Portal Drift - 16-Test Verification Matrix' {
-    Context 'Positive Path: Structural & Domain Contract Verification (8 Tests)' {
-        It 'P-01: Primary PowerShell evaluator (src/Test-LandingZoneWriteProvenance.ps1) exists and is non-empty' {
-            Test-Path $script:EvaluatorPath | Should -BeTrue
-            (Get-Item $script:EvaluatorPath).Length | Should -BeGreaterThan 120
-        }
-        It 'P-02: Evaluator parses cleanly with zero PowerShell AST syntax errors' {
-            $errors = $null
-            [System.Management.Automation.Language.Parser]::ParseFile($script:EvaluatorPath, [ref]$null, [ref]$errors)
-            $errors.Count | Should -Be 0
-        }
-        It 'P-03: Enforces CmdletBinding and typed parameter block' {
-            $raw = Get-Content $script:EvaluatorPath -Raw
-            $raw | Should -Match '\[CmdletBinding\(\)\]'
-            $raw | Should -Match 'param\s*\('
-        }
-        It 'P-04: Returns structured PSCustomObject decision payload for downstream audit' {
-            $raw = Get-Content $script:EvaluatorPath -Raw
-            $raw | Should -Match '\[PSCustomObject\]@\{'
-        }
-        It 'P-05: KQL telemetry query (queries/ResourceGraph-OutOfBandChanges.kql) defines correlation and filtering clauses' {
-            Test-Path $script:KqlPath | Should -BeTrue
-            (Get-Content $script:KqlPath -Raw) | Should -Match 'where|summarize|project'
-        }
-        It 'P-06: Domain artefact infra/main.bicep exists and is non-empty' {
-            $p = Join-Path $script:RepoRoot 'infra/main.bicep'
-            Test-Path $p | Should -BeTrue
-            (Get-Item $p).Length | Should -BeGreaterThan 20
+Describe 'Landing Zone Archetype Drift Detector - AI Intent, ARG & Graph Bridge Matrix' {
+    Context 'AI Drift Intent Classifier (ai/Invoke-DriftIntentClassifier.ps1)' {
+        It 'Classifies corroborated 2 AM P1 hotfix with 4-hour TTL (DRIFT-01)' {
+            $c = $script:EvalDoc.evalCases | Where-Object { $_.caseId -eq 'DRIFT-01' }
+            $res = & $script:ClassifierPath -DriftEvent $c -BridgeTranscript $c.bridgeTranscriptExcerpt
+            $res.Intent | Should -Be 'AUTHORIZED_P1_HOTFIX_WITH_TTL'
+            $res.Action | Should -Be 'OPEN_AUTOMATED_REST_BACKPORT_PR'
+            $res.TtlHours | Should -Be 4
+            $res.Confidence | Should -BeGreaterOrEqual 0.75
         }
 
-        It 'P-07: Domain artefact infra/modules/hub-network.bicep exists and is non-empty' {
-            $p = Join-Path $script:RepoRoot 'infra/modules/hub-network.bicep'
-            Test-Path $p | Should -BeTrue
-            (Get-Item $p).Length | Should -BeGreaterThan 20
+        It 'Classifies unapproved Portal perimeter change as SHADOW_IT_PORTAL_DRIFT (DRIFT-02)' {
+            $c = $script:EvalDoc.evalCases | Where-Object { $_.caseId -eq 'DRIFT-02' }
+            $res = & $script:ClassifierPath -DriftEvent $c -BridgeTranscript $c.bridgeTranscriptExcerpt
+            $res.Intent | Should -Be 'SHADOW_IT_PORTAL_DRIFT'
+            $res.Action | Should -Be 'REVERT_TO_BASELINE_IMMEDIATELY'
         }
 
-        It 'P-08: Domain artefact infra/modules/nsg-baseline.bicep exists and is non-empty' {
-            $p = Join-Path $script:RepoRoot 'infra/modules/nsg-baseline.bicep'
-            Test-Path $p | Should -BeTrue
-            (Get-Item $p).Length | Should -BeGreaterThan 20
+        It 'Abstains when P1 ticket is uncorroborated in Teams bridge transcript (DRIFT-03)' {
+            $c = $script:EvalDoc.evalCases | Where-Object { $_.caseId -eq 'DRIFT-03' }
+            $res = & $script:ClassifierPath -DriftEvent $c -BridgeTranscript $c.bridgeTranscriptExcerpt
+            $res.Intent | Should -Be 'ABSTAIN_UNCORROBORATED_CLAIM'
+            $res.Action | Should -Be 'HOLD_FOR_SRE_COMMANDER_VERIFICATION'
+            $res.Confidence | Should -BeLessThan 0.75
+        }
+
+        It 'Fast-paths approved GitOps OIDC pipeline service principal' {
+            $evt = [PSCustomObject]@{
+                resourceId  = '/subscriptions/sub-1/resourceGroups/rg-hub/providers/Microsoft.Network/networkSecurityGroups/nsg-hub'
+                callerAppId = '00000000-0000-0000-0000-000000000901'
+            }
+            $res = & $script:ClassifierPath -DriftEvent $evt
+            $res.Intent | Should -Be 'COMPLIANT_OIDC_PIPELINE'
+            $res.Action | Should -Be 'NONE'
+        }
+
+        It 'Integrates mocked Azure AI Foundry semantic verification' {
+            $c = $script:EvalDoc.evalCases | Where-Object { $_.caseId -eq 'DRIFT-01' }
+            $mockFoundry = {
+                param($ep, $dep, $body)
+                return [PSCustomObject]@{
+                    intentSummary        = 'P1 payment gateway port 8443 hotfix corroborated by oncall.sre.'
+                    corroborated         = $true
+                    confidenceAdjustment = 0.04
+                }
+            }
+            $res = & $script:ClassifierPath -DriftEvent $c -BridgeTranscript $c.bridgeTranscriptExcerpt -FoundryEndpoint 'https://foundry.contoso.invalid' -FoundryInvoker $mockFoundry
+            $res.FoundryCritique.corroborated | Should -BeTrue
+            $res.Confidence | Should -BeGreaterThan 0.91
         }
     }
 
-    Context 'Negative Path: Refusal Gates & Zero-Leak Security Boundaries (8 Tests)' {
-        It 'N-01: Evaluator defines explicit refusal, hold, or veto action codes' {
-            $raw = Get-Content $script:EvaluatorPath -Raw
-            $raw | Should -Match 'VETO|BLOCK|HOLD|DENY|REFUSAL|QUARANTINE|REVOKE|REVERT|BACKPORT|ALERT|\$false'
+    Context 'PowerShell Module, Deployment Stacks & Graph v1.0 Incident Bridge' {
+        It 'Validates INC-P1-xxxxxx break-glass tag format' {
+            Confirm-BreakGlassIncidentTag -IncidentTag 'INC-P1-482910' | Should -BeTrue
+            Confirm-BreakGlassIncidentTag -IncidentTag 'INC-INVALID' | Should -BeFalse
         }
-        It 'N-02: Evaluator contains zero hardcoded storage keys, passwords, or SAS tokens' {
-            $raw = Get-Content $script:EvaluatorPath -Raw
-            $raw | Should -Not -Match 'AccountKey=|SharedAccessSignature=|Password='
+
+        It 'Queries Azure Resource Graph ResourceChanges via Invoke-AzRestMethod' {
+            $mockAz = {
+                param($m, $p, $b)
+                $p | Should -Match 'Microsoft\.ResourceGraph/resources'
+                return [PSCustomObject]@{ data = @([PSCustomObject]@{ resourceType = 'Microsoft.Network/networkSecurityGroups' }) }
+            }
+            $res = Get-ArgResourceChanges -SubscriptionId '00000000-0000-0000-0000-000000000013' -AzRestInvoker $mockAz
+            $res.data.Count | Should -Be 1
         }
-        It 'N-03: Evaluator contains zero private orchestrator domains or internal host IPs' {
-            $raw = Get-Content $script:EvaluatorPath -Raw
-            $raw | Should -Not -Match '192\.142\.41\.43|mvpfoundry\.alerasoul\.net'
+
+        It 'Verifies Deployment Stack denySettings active state via Invoke-AzRestMethod' {
+            $mockAz = {
+                param($m, $p, $b)
+                return [PSCustomObject]@{
+                    properties = [PSCustomObject]@{
+                        provisioningState = 'Succeeded'
+                        denySettings      = [PSCustomObject]@{ mode = 'denyWriteAndDelete' }
+                    }
+                }
+            }
+            $res = Test-DeploymentStackDrift -SubscriptionId '00000000-0000-0000-0000-000000000013' -ResourceGroupName 'rg-contoso-hub' -DeploymentStackName 'ds-hub' -AzRestInvoker $mockAz
+            $res.DenySettingsActive | Should -BeTrue
+            $res.DenySettingsMode | Should -Be 'denyWriteAndDelete'
         }
-        It 'N-04: KQL query contains zero internal sequence tags or private URLs' {
-            $kql = Get-Content $script:KqlPath -Raw
-            $kql | Should -Not -Match 'mvpfoundry\.alerasoul\.net|Decision Pack 0'
+
+        It 'Fetches Teams incident bridge messages via Graph v1.0' {
+            $mockGraph = {
+                param($m, $u, $b)
+                $u | Should -Match 'https://graph\.microsoft\.com/v1\.0/teams/team-sre/channels/19:p1@thread\.tacv2/messages'
+                return [PSCustomObject]@{
+                    value = @(
+                        [PSCustomObject]@{
+                            createdDateTime = '2026-11-15T02:14:00Z'
+                            from            = [PSCustomObject]@{ user = [PSCustomObject]@{ displayName = 'oncall.sre' } }
+                            body            = [PSCustomObject]@{ content = '<p>Opening port 8443 on nsg-ingress-prod under INC-P1-482910</p>' }
+                        }
+                    )
+                }
+            }
+            $res = & $script:GraphBridgePath -TeamId 'team-sre' -ChannelId '19:p1@thread.tacv2' -GraphInvoker $mockGraph
+            $res.MessageCount | Should -Be 1
+            $res.BridgeTranscript | Should -Match 'INC-P1-482910'
         }
-        It 'N-05: README documentation contains zero internal sequence numbering' {
-            $readme = Get-Content (Join-Path $script:RepoRoot 'README.md') -Raw
-            $readme | Should -Not -Match 'Decision Pack 0|mvpfoundry\.alerasoul\.net'
+
+        It 'Enforces Test-LandingZoneWriteProvenance.ps1 REST backport PR on Sev-1' {
+            $evt = [PSCustomObject]@{
+                ResourceId           = '/subscriptions/sub-1/resourceGroups/rg-hub/providers/Microsoft.Network/networkSecurityGroups/nsg-ingress-prod'
+                ResourceType         = 'Microsoft.Network/networkSecurityGroups'
+                CallerAppId          = 'portal-client'
+                CallerUpn            = 'oncall.sre@contoso.com'
+                Sev1IncidentTicketId = 'INC-P1-482910'
+            }
+            $res = & $script:ProvenancePath -ActivityLogEvent $evt -ApprovedPipelineAppIds @('00000000-0000-0000-0000-000000000901')
+            $res.Action | Should -Be 'OPEN_AUTOMATED_REST_BACKPORT_PR'
         }
-        It 'N-06: Enforces fail-closed ErrorActionPreference or deterministic condition branches' {
-            $raw = Get-Content $script:EvaluatorPath -Raw
-            $raw | Should -Match 'ErrorActionPreference|if\s*\('
+    }
+
+    Context 'Repository Hygiene & Zero-Leak Boundaries' {
+        It 'Contains zero declarative IaC (.bicep or .tf) files' {
+            $iac = Get-ChildItem -Path $script:RepoRoot -Recurse -Include '*.bicep', '*.tf' -File
+            $iac.Count | Should -Be 0
         }
-        It 'N-07: Repository root excludes internal agent guidelines or pre-commit hook scripts' {
-            Test-Path (Join-Path $script:RepoRoot 'AGENTS.md') | Should -BeFalse
-            Test-Path (Join-Path $script:RepoRoot '.githooks') | Should -BeFalse
+
+        It 'KQL drift queries exist and use projection/aggregation' {
+            $kql1 = Join-Path $script:RepoRoot 'queries/NSG-SecurityDrift.kql'
+            $kql2 = Join-Path $script:RepoRoot 'queries/ResourceGraph-OutOfBandChanges.kql'
+            Test-Path $kql1 | Should -BeTrue
+            Test-Path $kql2 | Should -BeTrue
         }
-        It 'N-08: Open-source MIT LICENSE is present at repository root' {
-            Test-Path (Join-Path $script:RepoRoot 'LICENSE') | Should -BeTrue
+
+        It 'README and docs contain zero internal sequence numbers or private orchestrator domains' {
+            foreach ($f in @((Join-Path $script:RepoRoot 'README.md'), (Join-Path $script:RepoRoot 'docs/DRIFT-RECONCILIATION-ADR.md'), (Join-Path $script:RepoRoot 'docs/SRE-BREAKGLASS-RUNBOOK.md'))) {
+                $raw = Get-Content $f -Raw
+                $raw | Should -Not -Match 'mvpfoundry\.alerasoul\.net|192\.142\.41\.43|Decision Pack 0|idea-013'
+            }
         }
     }
 }

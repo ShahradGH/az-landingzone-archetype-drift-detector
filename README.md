@@ -4,13 +4,20 @@ Autonomous drift detection and intent classification for **Azure Landing Zones**
 
 ---
 
-## Executive & C-Suite Brief
+## Executive & C-Suite Business Value
 
 ### Business Risk Addressed
 Platform teams spend months hardening hub-and-spoke Landing Zones with NSG baselines, Private Endpoints, and Deployment Stacks—only for an ad-hoc Portal change (`sourceAddressPrefix = *`) or an undocumented 02:00 UTC hotfix to silently open a perimeter hole. Conversely, blind auto-revert bots can break legitimate Priority-1 (P1) outage recoveries mid-incident.
 
 ### Measurable ROI & Compliance Impact
-- **Zero-Friction P1 Recovery With 4-Hour Accountability**: Legitimate P1 hotfixes corroborated in the Microsoft Teams incident bridge are granted a tracked 4-hour TTL backport PR (`AUTHORIZED_P1_HOTFIX_WITH_TTL`).
+| Governance Dimension | Blind Auto-Revert Bot | Intent-Aware Drift Detector |
+| :--- | :--- | :--- |
+| **P1 Outage Recovery** | Reverts emergency fixes mid-incident | **Protected** via Teams bridge + PIM corroboration |
+| **Shadow-IT Perimeter Drift** | Discovered weeks later in audits | **Flagged immediately** (`SHADOW_IT_PORTAL_DRIFT`) |
+| **4-Hour Hotfix Accountability** | Lost in chat threads | **Tracked TTL backport PR** (`AUTHORIZED_P1_HOTFIX_WITH_TTL`) |
+| **Anti-Spoofing Safety** | Trusts raw ticket strings | **Fail-closed abstention** (`ABSTAIN_UNCORROBORATED_CLAIM`) |
+
+- **Zero-Friction P1 Recovery With 4-Hour Accountability**: Legitimate P1 hotfixes corroborated in the Microsoft Teams incident bridge and Entra ID PIM are granted a tracked 4-hour TTL backport PR (`AUTHORIZED_P1_HOTFIX_WITH_TTL`).
 - **Immediate Shadow-IT Perimeter Protection**: Uncorroborated Portal or CLI changes to NSGs, Route Tables, Public IPs, or Key Vaults are flagged `SHADOW_IT_PORTAL_DRIFT` for immediate reversion.
 - **Anti-Spoofing Epistemic Abstention**: Supplying a random `INC-P1-` ticket string without Teams bridge corroboration triggers `ABSTAIN_UNCORROBORATED_CLAIM` (`Confidence < 0.75`), routing to the SRE Incident Commander.
 
@@ -32,6 +39,11 @@ Platform teams spend months hardening hub-and-spoke Landing Zones with NSG basel
 ---
 
 ## AI Subcomponent & Pilot Grafting Guide
+
+### Chief Architect / Chief Engineer Pilot-Grafting Instructions
+1. **Entra ID Workload Identity & Graph Scopes**: Assign a Managed Identity to your drift-watch runner with Microsoft Graph `Directory.Read.All`, `RoleAssignmentSchedule.Read.Directory`, `ChannelMessage.Read.All`, and `ChannelMessage.Send`, plus Azure `Reader` on Management Group scope.
+2. **Graft onto Existing Landing Zone Pipelines**: Import `identity/DriftIdentityGovernance.psm1` alongside `src/LandingZoneDrift.psm1` to resolve Activity Log callers (`Resolve-DriftCallerPrincipal`) and verify active PIM elevations (`Test-BreakGlassPimActivation`)—zero Bicep or Terraform templates required.
+3. **Wire Teams Incident Bridge Corroboration**: Point `graph/Get-IncidentBridgeContext.ps1` at your SRE P1 Teams channel so `ai/Invoke-DriftIntentClassifier.ps1` never auto-reverts an active, PIM-backed incident recovery.
 
 ### Quickstart: Run AI Drift Intent Classification & Pester 6.x Matrix
 ```powershell

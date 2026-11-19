@@ -144,4 +144,51 @@ Describe 'Landing Zone Archetype Drift Detector - AI Intent, ARG & Graph Bridge 
             }
         }
     }
+
+    Context 'Identity & Microsoft Graph v2.x Drift Governance Module' {
+        BeforeAll {
+            Import-Module (Join-Path $script:RepoRoot 'identity/DriftIdentityGovernance.psd1') -Force
+        }
+
+        It 'Classifies an approved CI/CD service principal as WorkloadIdentity' {
+            $mockGraph = {
+                param($m, $u, $b)
+                return [PSCustomObject]@{ id = 'sp-901'; appId = 'app-901'; displayName = 'ALZ-Deploy-SP'; accountEnabled = $true }
+            }
+
+            $res = Resolve-DriftCallerPrincipal -CallerAppId 'app-901' -ApprovedPipelineAppIds @('app-901') -GraphInvoker $mockGraph
+            $res.PrincipalKind | Should -Be 'WorkloadIdentity'
+            $res.IsApprovedCICD | Should -BeTrue
+            $res.RequiresPimCheck | Should -BeFalse
+        }
+
+        It 'Classifies a portal user write as InteractiveUser requiring PIM check' {
+            $mockGraph = {
+                param($m, $u, $b)
+                return [PSCustomObject]@{ id = 'usr-44'; userPrincipalName = 'sre@contoso.com'; displayName = 'SRE OnCall'; accountEnabled = $true; userType = 'Member' }
+            }
+
+            $res = Resolve-DriftCallerPrincipal -CallerAppId 'portal-session' -CallerUpn 'sre@contoso.com' -ApprovedPipelineAppIds @('app-901') -GraphInvoker $mockGraph
+            $res.PrincipalKind | Should -Be 'InteractiveUser'
+            $res.RequiresPimCheck | Should -BeTrue
+        }
+
+        It 'Verifies active Entra ID PIM role assignment schedule instances' {
+            $mockGraph = {
+                param($m, $u, $b)
+                return [PSCustomObject]@{ value = @([PSCustomObject]@{ roleDefinitionId = 'role-contrib-01' }) }
+            }
+
+            $res = Test-BreakGlassPimActivation -PrincipalId 'usr-44' -GraphInvoker $mockGraph
+            $res.HasActiveElevation | Should -BeTrue
+            $res.ActivePimCount | Should -Be 1
+        }
+
+        It 'Dispatches Shadow-IT drift governance escalation to Teams channel' {
+            $mockGraph = { param($m, $u, $b) return [PSCustomObject]@{ id = 'msg-drift-01' } }
+            $res = Send-DriftGovernanceEscalation -TeamId 't-lz' -ChannelId 'c-lz' -ResourceId '/subscriptions/sub/nsg-app' -Classification 'SHADOW_IT_PORTAL_DRIFT' -CallerDisplayName 'Dev Contractor' -GraphInvoker $mockGraph
+            $res.Dispatched | Should -BeTrue
+            $res.MessageId | Should -Be 'msg-drift-01'
+        }
+    }
 }
